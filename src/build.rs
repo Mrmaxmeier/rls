@@ -8,39 +8,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-extern crate getopts;
-extern crate rustc;
-extern crate rustc_driver;
-extern crate rustc_errors as errors;
-extern crate rustc_resolve;
-extern crate rustc_save_analysis;
-extern crate syntax;
-
-use cargo::core::{PackageId, MultiShell, Workspace};
-use cargo::ops::{compile_with_exec, Executor, Context, CompileOptions, CompileMode, CompileFilter};
-use cargo::util::{Config as CargoConfig, ProcessBuilder, ProcessError, homedir, ConfigValue};
+#![allow(dead_code)]
 
 use data::Analysis;
 use vfs::Vfs;
-use self::rustc::session::Session;
-use self::rustc::session::config::{self, Input, ErrorOutputType};
-use self::rustc_driver::{RustcDefaultCalls, run_compiler, run, Compilation, CompilerCalls};
-use self::rustc_driver::driver::CompileController;
-use self::rustc_save_analysis as save;
-use self::rustc_save_analysis::CallbackHandler;
-use self::syntax::ast;
-use self::syntax::codemap::{FileLoader, RealFileLoader};
-
-use config::Config;
 
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
-use std::fs::{read_dir, remove_file};
+// use std::fs::{read_dir, remove_file};
 use std::io::{self, Write};
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};

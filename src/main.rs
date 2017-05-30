@@ -8,22 +8,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(rustc_private)]
 #![feature(concat_idents)]
 
-extern crate cargo;
 #[macro_use]
 extern crate derive_new;
 extern crate env_logger;
 extern crate languageserver_types as ls_types;
 #[macro_use]
 extern crate log;
-extern crate racer;
-extern crate rls_analysis as analysis;
 extern crate rls_vfs as vfs;
 extern crate rls_span as span;
 extern crate rls_data as data;
-extern crate rustfmt;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;

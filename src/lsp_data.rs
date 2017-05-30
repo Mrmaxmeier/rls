@@ -12,11 +12,9 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::error::Error;
 
-use analysis::raw;
 use url::Url;
 use serde::Serialize;
 use span;
-use racer;
 use vfs::FileContents;
 
 pub use ls_types::*;
