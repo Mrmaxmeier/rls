@@ -33,42 +33,30 @@ extern crate toml;
 extern crate url;
 extern crate url_serde;
 
+extern crate aho_corasick;
+extern crate tectonic;
+extern crate parking_lot;
+
 use std::sync::Arc;
+use std::io::Write;
 
 mod actions;
-mod build;
-mod cmd;
-mod config;
+mod analysis;
+// mod build; // see analysis::build_queue
+// mod cmd;
+// mod config;
 mod lsp_data;
 mod server;
 
-#[cfg(test)]
-mod test;
-
-// Timeout = 1.5s (totally arbitrary).
-const COMPILER_TIMEOUT: u64 = 1500;
 
 type Span = span::Span<span::ZeroIndexed>;
-
 pub fn main() {
+    eprintln!("out of cheese error");
     env_logger::init().unwrap();
 
-    if let Some(first_arg) = ::std::env::args().skip(1).next() {
-        match first_arg.as_str() {
-            "--version" | "-V" => println!("rls {}", version()),
-            _ => cmd::run(),
-        }
-        return;
-    }
-
-    let analysis = Arc::new(analysis::AnalysisHost::new(analysis::Target::Debug));
     let vfs = Arc::new(vfs::Vfs::new());
-    let build_queue = Arc::new(build::BuildQueue::new(vfs.clone()));
 
-    server::run_server(analysis, vfs, build_queue);
-}
+    let (build_queue, analysis_host) = analysis::BuildQueue::connected(vfs.clone());
 
-fn version() -> &'static str {
-    // FIXME when we have non-nightly channels, we shouldn't hardwire the "nightly" string here.
-    concat!(env!("CARGO_PKG_VERSION"), "-nightly", include_str!(concat!(env!("OUT_DIR"), "/commit-info.txt")))
+    server::run_server(vfs, Arc::new(build_queue));
 }

@@ -11,23 +11,21 @@
 mod compiler_message_parsing;
 mod lsp_extensions;
 
-use analysis::{AnalysisHost};
+use analysis::{AnalysisDriver};
 use url::Url;
 use vfs::{Vfs, Change, FileContents};
 use serde_json;
-use span;
 use Span;
 
-use build::*;
+use analysis::build_queue::*;
 use lsp_data::*;
-use server::{ResponseData, Output};
+// use server::{ResponseData, Output};
+use server::Output;
 
 use std::collections::HashMap;
-use std::panic;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use std::io::Write;
 
 use self::lsp_extensions::{PublishRustDiagnosticsParams, RustDiagnostic};
 use self::compiler_message_parsing::{FileDiagnostic, ParseError};
@@ -35,27 +33,26 @@ use self::compiler_message_parsing::{FileDiagnostic, ParseError};
 type BuildResults = HashMap<PathBuf, Vec<RustDiagnostic>>;
 
 pub struct ActionHandler {
-    analysis: Arc<AnalysisHost>,
     vfs: Arc<Vfs>,
     build_queue: Arc<BuildQueue>,
     current_project: Mutex<Option<PathBuf>>,
+    current_file: Mutex<Option<PathBuf>>,
     previous_build_results: Mutex<BuildResults>,
 }
 
 impl ActionHandler {
-    pub fn new(analysis: Arc<AnalysisHost>,
-           vfs: Arc<Vfs>,
-           build_queue: Arc<BuildQueue>) -> ActionHandler {
+    pub fn new(vfs: Arc<Vfs>, build_queue: Arc<BuildQueue>) -> ActionHandler {
         ActionHandler {
-            analysis: analysis,
             vfs: vfs,
             build_queue: build_queue,
             current_project: Mutex::new(None),
+            current_file: Mutex::new(None),
             previous_build_results: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn init(&self, root_path: PathBuf, out: &Output) {
+        eprintln!("Action::init");
         {
             let mut results = self.previous_build_results.lock().unwrap();
             results.clear();
@@ -111,12 +108,13 @@ impl ActionHandler {
             .collect()
         }
 
-        // We use `rustDocument` document here since these notifications are
+        // We use `texDocument` document here since these notifications are
         // custom to the RLS and not part of the LS protocol.
-        out.notify("rustDocument/diagnosticsBegin");
+        out.notify("texDocument/diagnosticsBegin");
 
         debug!("build {:?}", project_path);
-        let result = self.build_queue.request_build(project_path, priority);
+        let current_file = Path::new("topkeke.tex"); // XXX
+        let result = self.build_queue.request_build(project_path, current_file, priority);
         match result {
             BuildResult::Success(x, analysis) | BuildResult::Failure(x, analysis) => {
                 debug!("build - Success");
@@ -139,22 +137,16 @@ impl ActionHandler {
                 }
 
                 trace!("reload analysis: {:?}", project_path);
-                let cwd = ::std::env::current_dir().unwrap();
-                if let Some(analysis) = analysis {
-                    self.analysis.reload_from_analysis(analysis, project_path, &cwd, false).unwrap();
-                } else {
-                    self.analysis.reload(project_path, &cwd, false).unwrap();
-                }
-
-                out.notify("rustDocument/diagnosticsEnd");
+                // let cwd = ::std::env::current_dir().unwrap();
+                out.notify("texDocument/diagnosticsEnd");
             }
             BuildResult::Squashed => {
                 trace!("build - Squashed");
-                out.notify("rustDocument/diagnosticsEnd");
+                out.notify("texDocument/diagnosticsEnd");
             },
             BuildResult::Err => {
                 trace!("build - Error");
-                out.notify("rustDocument/diagnosticsEnd");
+                out.notify("texDocument/diagnosticsEnd");
             },
         }
     }
@@ -209,6 +201,15 @@ impl ActionHandler {
         }
     }
 
+    pub fn symbols(&self, _: usize, _: DocumentSymbolParams, _: &Output) { unimplemented!() }
+    pub fn complete(&self, _: usize, _: TextDocumentPositionParams, _: &Output) { unimplemented!() }
+    pub fn rename(&self, _: usize, _: RenameParams, _: &Output) { unimplemented!() }
+    pub fn highlight(&self, _: usize, _: TextDocumentPositionParams, _: &Output) { unimplemented!() }
+    pub fn find_all_refs(&self, _: usize, _: ReferenceParams, _: &Output) { unimplemented!() }
+    pub fn goto_def(&self, _: usize, _: TextDocumentPositionParams, _: &Output) { unimplemented!() }
+    pub fn hover(&self, _: usize, _: TextDocumentPositionParams, _: &Output) { unimplemented!() }
+
+    /*
     pub fn symbols(&self, id: usize, doc: DocumentSymbolParams, out: &Output) {
         let t = thread::current();
         let analysis = self.analysis.clone();
@@ -416,55 +417,6 @@ impl ActionHandler {
         }
     }
 
-    pub fn reformat(&self, id: usize, doc: TextDocumentIdentifier, out: &Output) {
-        trace!("Reformat: {} {:?}", id, doc);
-
-        let path = &parse_file_path(&doc.uri).unwrap();
-        let input = match self.vfs.load_file(path) {
-            Ok(FileContents::Text(s)) => FmtInput::Text(s),
-            Ok(_) => {
-                debug!("Reformat failed, found binary file");
-                out.failure(id, "Reformat failed to complete successfully");
-                return;
-            }
-            Err(e) => {
-                debug!("Reformat failed: {:?}", e);
-                out.failure(id, "Reformat failed to complete successfully");
-                return;
-            }
-        };
-
-        let mut config = config::Config::default();
-        config.set().skip_children(true);
-        config.set().write_mode(WriteMode::Plain);
-
-        let mut buf = Vec::<u8>::new();
-        match format_input(input, &config, Some(&mut buf)) {
-            Ok((summary, ..)) => {
-                // format_input returns Ok even if there are any errors, i.e., parsing errors.
-                if summary.has_no_errors() {
-                    // Note that we don't need to keep the VFS up to date, the client
-                    // echos back the change to us.
-                    let range = ls_util::range_from_vfs_file(&self.vfs, path);
-                    let text = String::from_utf8(buf).unwrap();
-                    let result = [TextEdit {
-                        range: range,
-                        new_text: text,
-                    }];
-                    out.success(id, ResponseData::TextEdit(result))
-                } else {
-                    debug!("reformat: format_input failed: has errors, summary = {:?}", summary);
-
-                    out.failure(id, "Reformat failed to complete successfully")
-                }
-            }
-            Err(e) => {
-                debug!("Reformat failed: {:?}", e);
-                out.failure(id, "Reformat failed to complete successfully")
-            }
-        }
-    }
-
     fn convert_pos_to_span(&self, doc: &TextDocumentIdentifier, pos: Position) -> Span {
         let fname = parse_file_path(&doc.uri).unwrap();
         trace!("convert_pos_to_span: {:?} {:?}", fname, pos);
@@ -503,32 +455,5 @@ impl ActionHandler {
                              end_pos,
                              fname.to_owned())
     }
-}
-
-fn racer_coord(line: span::Row<span::OneIndexed>,
-               column: span::Column<span::ZeroIndexed>)
-               -> racer::Coordinate {
-    racer::Coordinate {
-        line: line.0 as usize,
-        column: column.0 as usize,
-    }
-}
-
-fn from_racer_coord(coord: racer::Coordinate) -> (span::Row<span::OneIndexed>,span::Column<span::ZeroIndexed>) {
-    (span::Row::new_one_indexed(coord.line as u32), span::Column::new_zero_indexed(coord.column as u32))
-}
-
-fn pos_to_racer_location(pos: Position) -> racer::Location {
-    let pos = ls_util::position_to_rls(pos);
-    racer::Location::Coords(racer_coord(pos.row.one_indexed(), pos.col))
-}
-
-fn location_from_racer_match(mtch: racer::Match) -> Option<Location> {
-    let source_path = &mtch.filepath;
-
-    mtch.coords.map(|coord| {
-        let (row, col) = from_racer_coord(coord);
-        let loc = span::Location::new(row.zero_indexed(), col, source_path);
-        ls_util::rls_location_to_location(&loc)
-    })
+    */
 }

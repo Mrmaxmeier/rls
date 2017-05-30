@@ -1,5 +1,5 @@
 [package]
-name = "rls"
+name = "texls"
 version = "0.1.0"
 authors = ["Nick Cameron <ncameron@mozilla.com>", "Jonathan Turner <jturner@mozilla.com>", "The RLS developers"]
 description = "Rust Language Server - provides information about Rust programs to IDEs and other tools"
@@ -10,6 +10,7 @@ categories = ["development-tools"]
 build = "build.rs"
 
 [dependencies]
+aho-corasick = "0.6.3"
 derive-new = "0.3"
 env_logger = "0.4"
 languageserver-types = "0.10.0"
@@ -21,5 +22,10 @@ serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
 toml = "0.4"
+parking_lot = "0.4.3"
 url = "1.1.0"
 url_serde = "0.2.0"
+
+[dependencies.tectonic]
+path = "./tectonic"
+version = "0.1.6-dev"

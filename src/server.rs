@@ -7,12 +7,13 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
+#![allow(dead_code)] // TODO
 
-use analysis::AnalysisHost;
+use analysis::AnalysisDriver;
 use vfs::Vfs;
 use serde_json;
 
-use build::*;
+use analysis::build_queue::*;
 use lsp_data::*;
 use actions::ActionHandler;
 
@@ -22,8 +23,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::path::PathBuf;
-
-use config::Config;
 
 #[derive(Debug, Serialize)]
 pub struct Ack {}
@@ -112,6 +111,7 @@ macro_rules! messages {
         }
         fn parse_message(input: &str) -> Result<ServerMessage, ParseError>  {
             let ls_command: serde_json::Value = serde_json::from_str(input).unwrap();
+            // eprintln!("{:?}", ls_command);
 
             let params = ls_command.get("params");
 
@@ -276,8 +276,7 @@ pub enum ServerStateChange {
 }
 
 impl LsService {
-    pub fn new(analysis: Arc<AnalysisHost>,
-               vfs: Arc<Vfs>,
+    pub fn new(vfs: Arc<Vfs>,
                build_queue: Arc<BuildQueue>,
                reader: Box<MessageReader + Send + Sync>,
                output: Box<Output + Send + Sync>)
@@ -286,24 +285,22 @@ impl LsService {
             shut_down: AtomicBool::new(false),
             msg_reader: reader,
             output: output,
-            handler: ActionHandler::new(analysis, vfs, build_queue),
+            handler: ActionHandler::new(vfs, build_queue),
         }
     }
 
     pub fn run(self) {
         let this = Arc::new(self);
         while LsService::handle_message(this.clone()) == ServerStateChange::Continue {}
+        eprintln!("ServerStateChange != Continue");
     }
 
     fn init(&self, id: usize, init: InitializeParams) {
+        eprintln!("server::init");
         let root_path = init.root_path.map(PathBuf::from);
-        let unstable_features = if let Some(ref root_path) = root_path {
-            let config = Config::from_path(&root_path);
-            config.unstable_features
-        } else {
-            false
-        };
 
+        /*
+        TODO re-enable capabilities as they're implemented
         let result = InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncKind::Incremental),
@@ -330,6 +327,27 @@ impl LsService {
                 rename_provider: Some(unstable_features),
             }
         };
+        */
+        let result = InitializeResult {
+            capabilities: ServerCapabilities {
+                text_document_sync: Some(TextDocumentSyncKind::Incremental),
+                hover_provider: Some(false),
+                completion_provider: None,
+                signature_help_provider: None,
+                definition_provider: Some(false),
+                references_provider: Some(false),
+                document_highlight_provider: Some(false),
+                document_symbol_provider: Some(false),
+                workspace_symbol_provider: Some(false),
+                code_action_provider: Some(false),
+                // TODO maybe?
+                code_lens_provider: None,
+                document_formatting_provider: Some(false),
+                document_range_formatting_provider: Some(false),
+                document_on_type_formatting_provider: None, // TODO: review this, maybe add?
+                rename_provider: Some(false),
+            }
+        };
         self.output.success(id, ResponseData::Init(result));
         if let Some(root_path) = root_path {
             self.handler.init(root_path, &*self.output);
@@ -337,6 +355,7 @@ impl LsService {
     }
 
     pub fn handle_message(this: Arc<Self>) -> ServerStateChange {
+        eprintln!("LsService::handle_message");
         // Allows to delegate message handling to a handler with
         // a default signature or to execute an arbitrary expression
         macro_rules! action {
@@ -407,6 +426,7 @@ impl LsService {
                 return ServerStateChange::Break
             },
         };
+        eprintln!("{:?}", message);
 
         let this = this.clone();
         thread::spawn(move || {
@@ -443,12 +463,14 @@ impl LsService {
                     Rename(params) => { action: rename };
                     Formatting(params) => {
                         // FIXME take account of options.
-                        this.handler.reformat(id, params.text_document, &*this.output)
+                        unimplemented!()
+                        // this.handler.reformat(id, params.text_document, &*this.output)
                     };
                     RangeFormatting(params) => {
                         // FIXME reformats the whole file, not just a range.
                         // FIXME take account of options.
-                        this.handler.reformat(id, params.text_document, &*this.output)
+                        unimplemented!()
+                        // this.handler.reformat(id, params.text_document, &*this.output)
                     };
                 }
                 notifications {
@@ -599,13 +621,13 @@ impl Output for StdioOutput {
     }
 }
 
-pub fn run_server(analysis: Arc<AnalysisHost>, vfs: Arc<Vfs>, build_queue: Arc<BuildQueue>) {
+pub fn run_server(vfs: Arc<Vfs>, build_queue: Arc<BuildQueue>) {
     debug!("Language Server Starting up");
-    let service = LsService::new(analysis,
-                                 vfs,
+    let service = LsService::new(vfs,
                                  build_queue,
                                  Box::new(StdioMsgReader),
                                  Box::new(StdioOutput));
+    eprintln!("LsService::run");
     LsService::run(service);
     debug!("Server shutting down");
 }
