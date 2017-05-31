@@ -24,8 +24,10 @@ use tectonic::errors::{ErrorKind, Result, ResultExt};
 use tectonic::io::{FilesystemIo, GenuineStdoutIo, InputOrigin, IoProvider, IoStack, MemoryIo, OpenResult};
 use tectonic::status::NoopStatusBackend;
 use tectonic::{TexEngine, TexResult};
+use vfs::Vfs;
 
-use super::build_queue::{BuildContext, BuildResult};
+use analysis::build_queue::{BuildContext, BuildResult};
+use analysis::vfs_wrapper::VfsIoProvider;
 
 /// The CliIoSetup struct encapsulates, well, the input/output setup used by
 /// the Tectonic engines in this CLI session.
@@ -43,15 +45,17 @@ use super::build_queue::{BuildContext, BuildResult};
 struct CliIoSetup {
     filesystem: FilesystemIo,
     mem: MemoryIo,
+    vfs: VfsIoProvider,
     bundle: Box<IoProvider>,
     genuine_stdout: Option<GenuineStdoutIo>,
 }
 
 impl CliIoSetup {
-    fn new(bundle: Box<IoProvider>) -> Result<CliIoSetup> {
+    fn new(bundle: Box<IoProvider>, vfs: Arc<Vfs>) -> Result<CliIoSetup> {
         Ok(CliIoSetup {
             mem: MemoryIo::new(true),
             bundle: bundle,
+            vfs: VfsIoProvider::new(vfs),
             filesystem: FilesystemIo::new(Path::new(""), false, true, HashSet::new()),
             genuine_stdout: None, // Some(GenuineStdoutIo::new()),
         })
@@ -64,6 +68,7 @@ impl CliIoSetup {
             providers.push(p);
         }
 
+        providers.push(&mut self.vfs);
         providers.push(&mut self.mem);
 
         if with_filesystem {
@@ -234,7 +239,7 @@ pub struct AnalysisDriver {
 const DEFAULT_MAX_TEX_PASSES: usize = 6;
 
 impl AnalysisDriver {
-    pub fn new() -> Result<AnalysisDriver> {
+    pub fn new(vfs: Arc<Vfs>) -> Result<AnalysisDriver> {
 
         let config = PersistentConfig::open(false)?;
         let mut status = NoopStatusBackend {};
@@ -243,7 +248,7 @@ impl AnalysisDriver {
 
         let config = PersistentConfig::open(false).unwrap();
         let bundle = config.default_io_provider(&mut status).unwrap();
-        let io = CliIoSetup::new(bundle)?;
+        let io = CliIoSetup::new(bundle, vfs)?;
 
         // Ready to roll.
 
@@ -256,10 +261,10 @@ impl AnalysisDriver {
         })
     }
 
-    pub fn spawn() -> Sender<BuildContext> {
+    pub fn spawn(vfs: Arc<Vfs>) -> Sender<BuildContext> {
         let (tx, rx) = channel();
         thread::spawn(move|| {
-            let driver = AnalysisDriver::new().unwrap();
+            let driver = AnalysisDriver::new(vfs).unwrap();
             let (rtx, rrx) = channel();
             tx.send(rtx).unwrap();
             driver.serve(rrx);
@@ -270,6 +275,7 @@ impl AnalysisDriver {
     fn serve(mut self, request_chan: Receiver<BuildContext>) {
         for request in &request_chan {
             eprintln!("new build request: {:?}", request);
+            self.io.vfs.set_base(request.directory.as_path());
             let result = match self.run(&request.file) {
                 Ok(_) => BuildResult::Success(self.notes.clone(), None), // TODO
                 Err(err) => {

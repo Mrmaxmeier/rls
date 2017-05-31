@@ -55,7 +55,7 @@ pub fn main() {
 
     let vfs = Arc::new(vfs::Vfs::new());
 
-    let build_request_chan = analysis::AnalysisDriver::spawn();
+    let build_request_chan = analysis::AnalysisDriver::spawn(vfs.clone());
     let build_queue = analysis::BuildQueue::new(vfs.clone(), build_request_chan);
 
     server::run_server(vfs, Arc::new(build_queue));
