@@ -9,7 +9,6 @@
 // except according to those terms.
 #![allow(dead_code)] // TODO
 
-use analysis::AnalysisDriver;
 use vfs::Vfs;
 use serde_json;
 
@@ -632,7 +631,7 @@ pub fn run_server(vfs: Arc<Vfs>, build_queue: Arc<BuildQueue>) {
     debug!("Server shutting down");
 }
 
-#[cfg(test)]
+#[cfg(notestspls)]
 mod test {
     use url::Url;
     use server::*;

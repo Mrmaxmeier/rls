@@ -61,10 +61,10 @@ impl ActionHandler {
             let mut current_project = self.current_project.lock().unwrap();
             *current_project = Some(root_path.clone());
         }
-        self.build(&root_path, BuildPriority::Immediate, out);
+        // self.build(&root_path, BuildPriority::Immediate, out); XXX
     }
 
-    pub fn build(&self, project_path: &Path, priority: BuildPriority, out: &Output) {
+    pub fn build(&self, project_path: &Path, current_file: &Path, priority: BuildPriority, out: &Output) {
         fn clear_build_results(results: &mut BuildResults) {
             // We must not clear the hashmap, just the values in each list.
             // This allows us to save allocated before memory.
@@ -113,7 +113,6 @@ impl ActionHandler {
         out.notify("texDocument/diagnosticsBegin");
 
         debug!("build {:?}", project_path);
-        let current_file = Path::new("topkeke.tex"); // XXX
         let result = self.build_queue.request_build(project_path, current_file, priority);
         match result {
             BuildResult::Success(x, analysis) | BuildResult::Failure(x, analysis) => {
@@ -155,13 +154,19 @@ impl ActionHandler {
         let fname = parse_file_path(&open.text_document.uri).unwrap();
         self.vfs.set_file(fname.as_path(), &open.text_document.text);
 
+        {
+            let mut _file = self.current_file.lock().unwrap();
+            *_file = Some(fname.as_path().to_path_buf())
+        }
+
         trace!("on_open: {:?}", fname);
 
-        self.build_current_project(BuildPriority::Normal, out);
+        self.build_file_in_project(&fname, BuildPriority::Normal, out);
     }
 
     pub fn on_change(&self, change: DidChangeTextDocumentParams, out: &Output) {
         let fname = parse_file_path(&change.text_document.uri).unwrap();
+        let fname2 = fname.clone();
         let changes: Vec<Change> = change.content_changes.iter().map(move |i| {
             if let Some(range) = i.range {
                 let range = ls_util::range_to_rls(range);
@@ -181,22 +186,22 @@ impl ActionHandler {
 
         trace!("on_change: {:?}", changes);
 
-        self.build_current_project(BuildPriority::Normal, out);
+        self.build_file_in_project(&fname2, BuildPriority::Normal, out);
     }
 
     pub fn on_save(&self, save: DidSaveTextDocumentParams, out: &Output) {
         let fname = parse_file_path(&save.text_document.uri).unwrap();
         self.vfs.file_saved(&fname).unwrap();
-        self.build_current_project(BuildPriority::Immediate, out);
+        self.build_file_in_project(&fname, BuildPriority::Immediate, out);
     }
 
-    fn build_current_project(&self, priority: BuildPriority, out: &Output) {
+    fn build_file_in_project(&self, file: &Path, priority: BuildPriority, out: &Output) {
         let current_project = {
             let current_project = self.current_project.lock().unwrap();
             current_project.clone()
         };
         match current_project {
-            Some(ref current_project) => self.build(current_project, priority, out),
+            Some(ref current_project) => self.build(current_project, file, priority, out),
             None => debug!("build_current_project - no project path"),
         }
     }

@@ -11,19 +11,14 @@
 #![allow(dead_code)]
 
 use data::Analysis;
-use analysis::AnalysisDriver;
 use vfs::Vfs;
 
-use std::collections::HashMap;
-use std::env;
-use std::ffi::OsString;
 // use std::fs::{read_dir, remove_file};
-use std::io::{self, Write};
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Sender, Receiver};
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -42,9 +37,9 @@ pub enum BuildResult {
 
 #[derive(Debug)]
 pub struct BuildContext {
-    directory: PathBuf,
-    file: PathBuf,
-    result_chan: Sender<BuildResult>
+    pub directory: PathBuf,
+    pub file: PathBuf,
+    pub result_chan: Sender<BuildResult>
 }
 
 /// Priority for a build request.
@@ -87,7 +82,7 @@ enum Signal {
 /// it was squashed.
 pub struct BuildQueue {
     build_dir: Mutex<Option<PathBuf>>,
-    tex_path: Mutex<Option<PathBuf>>,
+    build_file: Mutex<Option<PathBuf>>,
     request_chan: Mutex<Sender<BuildContext>>,
     // True if a build is running.
     // Note I have been conservative with Ordering when accessing this atomic,
@@ -99,18 +94,15 @@ pub struct BuildQueue {
 }
 
 impl BuildQueue {
-    pub fn connected(vfs: Arc<Vfs>) -> (BuildQueue, AnalysisDriver) {
-        let (req_tx, req_rx) = channel();
-        let bq = BuildQueue {
+    pub fn new(vfs: Arc<Vfs>, req_tx: Sender<BuildContext>) -> Self {
+        BuildQueue {
             request_chan: Mutex::new(req_tx),
             build_dir: Mutex::new(None),
-            tex_path: Mutex::new(None),
+            build_file: Mutex::new(None),
             running: AtomicBool::new(false),
             pending: Mutex::new(vec![]),
             vfs: vfs,
-        };
-        let driver = AnalysisDriver::new(req_rx).unwrap();
-        (bq, driver)
+        }
     }
 
     pub fn request_build(&self, build_dir: &Path, build_file: &Path, priority: BuildPriority) -> BuildResult {
@@ -125,6 +117,11 @@ impl BuildQueue {
                 *prev_build_dir = Some(build_dir.to_owned());
                 self.cancel_pending();
             }
+        }
+
+        {
+            let mut prev_build_file = self.build_file.lock().unwrap();
+            *prev_build_file = Some(build_file.to_owned());
         }
 
         self.cancel_pending();
@@ -210,16 +207,17 @@ impl BuildQueue {
     // Build the project.
     fn build(&self) -> BuildResult {
         let build_dir = &self.build_dir.lock().unwrap();
+        let build_file = &self.build_file.lock().unwrap();
+        eprintln!("build({:?}, {:?})", build_dir.as_ref(), build_file.as_ref());
         let build_dir = build_dir.as_ref().unwrap();
-        let tex_path = &self.tex_path.lock().unwrap();
-        let tex_path = tex_path.as_ref().unwrap();
+        let build_file = build_file.as_ref().unwrap();
 
         let (result_tx, result_rx) = channel();
         {
             let request_chan = self.request_chan.lock().unwrap();
             request_chan.send(BuildContext {
                 directory: build_dir.clone(),
-                file: tex_path.clone(),
+                file: build_file.clone(),
                 result_chan: result_tx,
             }).unwrap();
         }

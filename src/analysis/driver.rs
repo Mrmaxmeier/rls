@@ -13,20 +13,17 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 use std::sync::mpsc::{channel, Sender, Receiver};
+use std::thread;
 
 use parking_lot::Mutex;
 
 use tectonic::config::PersistentConfig;
 use tectonic::digest::DigestData;
 use tectonic::engines::IoEventBackend;
-use tectonic::errors::{Result, ResultExt};
-use tectonic::io::{FilesystemIo, GenuineStdoutIo, InputOrigin, IoProvider, IoStack, MemoryIo};
-use tectonic::io::itarbundle::{HttpITarIoFactory, ITarBundle};
-use tectonic::io::zipbundle::ZipBundle;
-use tectonic::io::local_cache::LocalCache;
-use tectonic::status::{ChatterLevel, StatusBackend};
+use tectonic::errors::{ErrorKind, Result, ResultExt};
+use tectonic::io::{FilesystemIo, GenuineStdoutIo, InputOrigin, IoProvider, IoStack, MemoryIo, OpenResult};
 use tectonic::status::NoopStatusBackend;
-use tectonic::{BibtexEngine, TexEngine, TexResult, XdvipdfmxEngine};
+use tectonic::{TexEngine, TexResult};
 
 use super::build_queue::{BuildContext, BuildResult};
 
@@ -60,7 +57,7 @@ impl CliIoSetup {
         })
     }
 
-    fn as_stack<'a> (&'a mut self) -> IoStack<'a> {
+    fn as_stack<'a> (&'a mut self, with_filesystem: bool) -> IoStack<'a> {
         let mut providers: Vec<&mut IoProvider> = Vec::new();
 
         if let Some(ref mut p) = self.genuine_stdout {
@@ -68,7 +65,11 @@ impl CliIoSetup {
         }
 
         providers.push(&mut self.mem);
-        providers.push(&mut self.filesystem);
+
+        if with_filesystem {
+            providers.push(&mut self.filesystem);
+        }
+
         providers.push(&mut *self.bundle);
 
         IoStack::new(providers)
@@ -225,14 +226,15 @@ pub struct AnalysisDriver {
     io: CliIoSetup,
     events: CliIoEvents,
     format_path: String,
-    status: NoopStatusBackend,
+    notes: Vec<String>, // current compilation notes
+    status: NoopStatusBackend
 }
 
 
 const DEFAULT_MAX_TEX_PASSES: usize = 6;
 
 impl AnalysisDriver {
-    pub fn new(request_rx: Receiver<BuildContext>) -> Result<AnalysisDriver> {
+    pub fn new() -> Result<AnalysisDriver> {
 
         let config = PersistentConfig::open(false)?;
         let mut status = NoopStatusBackend {};
@@ -248,9 +250,36 @@ impl AnalysisDriver {
         Ok(AnalysisDriver {
             io: io,
             events: CliIoEvents::new(),
-            format_path: "xelatex.fmt".to_owned(),
+            format_path: "latex".to_owned(),
             status: status,
+            notes: Vec::new()
         })
+    }
+
+    pub fn spawn() -> Sender<BuildContext> {
+        let (tx, rx) = channel();
+        thread::spawn(move|| {
+            let driver = AnalysisDriver::new().unwrap();
+            let (rtx, rrx) = channel();
+            tx.send(rtx).unwrap();
+            driver.serve(rrx);
+        });
+        rx.recv().unwrap()
+    }
+
+    fn serve(mut self, request_chan: Receiver<BuildContext>) {
+        for request in &request_chan {
+            eprintln!("new build request: {:?}", request);
+            let result = match self.run(&request.file) {
+                Ok(_) => BuildResult::Success(self.notes.clone(), None), // TODO
+                Err(err) => {
+                    eprintln!("Build error: {:?}", err);
+                    BuildResult::Err
+                },
+            };
+            eprintln!("reporting result: {:?}", result);
+            request.result_chan.send(result).unwrap();
+        }
     }
 
     /// Assess whether we need to rerun an engine. This is the case if there
@@ -283,8 +312,30 @@ impl AnalysisDriver {
 
     pub fn run(&mut self, tex_path: &PathBuf) -> Result<()> {
         // Do the meat of the work.
+        self.notes = Vec::new();
 
-        self.default_pass(tex_path, false)?;
+        let generate_format = {
+            let fmt_result = {
+                let mut stack = self.io.as_stack(true);
+                stack.input_open_format(OsStr::new(&self.format_path), &mut self.status)
+            };
+
+            match fmt_result {
+                OpenResult::Ok(_) => false,
+                OpenResult::NotAvailable => true,
+                OpenResult::Err(e) => {
+                    return Err(e).chain_err(|| format!("could not open format file {}", self.format_path));
+                },
+            }
+        };
+
+        if generate_format {
+            self.notes.push(format!("generating format '{}'", self.format_path));
+            self.make_format_pass()?;
+        }
+
+        self.default_pass(tex_path)?;
+        self.notes.push(format!("successfully ran default pass on {:?}", tex_path));
 
 
         let mut n_skipped_intermediates = 0;
@@ -307,37 +358,103 @@ impl AnalysisDriver {
             }
 
             if contents.len() == 0 {
-                // self.status.note_highlighted("Not writing ", &name, ": it would be empty.");
+                self.notes.push(format!("Writing {}: it would be empty", &sname));
                 continue;
             }
 
-            // self.status.note_highlighted("Writing ", &name, &format!(" ({} bytes)", contents.len()));
+            self.notes.push(format!("Writing {} ({} bytes)", &sname, contents.len()));
 
             let mut f = File::create(Path::new(name))?;
             f.write_all(contents)?;
             summ.got_written_to_disk = true;
         }
 
-        /*
         if n_skipped_intermediates > 0 {
-            self.status.note_highlighted("Skipped writing ", &format!("{}", n_skipped_intermediates),
-                                    " intermediate files (use --keep-intermediates to keep them)");
+            self.notes.push(format!("Skipped writing {} intermediate files", n_skipped_intermediates));
         }
-        */
 
         // All done.
 
         Ok(())
     }
 
+    /// Use the TeX engine to generate a format file.
+    fn make_format_pass(&mut self) -> Result<i32> {
+        // PathBuf.file_stem() doesn't do what we want since it only strips
+        // one extension. As of 1.17, the compiler needs a type annotation for
+        // some reason, which is why we use the `r` variable.
+        let r: Result<&str> = self.format_path.splitn(2, ".").next().ok_or_else(
+            || ErrorKind::Msg(format!("incomprehensible format file name \"{}\"", self.format_path)).into()
+        );
+        let stem = r?;
+
+        let result = {
+            let mut stack = self.io.as_stack(false);
+            let mut engine = TexEngine::new();
+            engine.set_halt_on_error_mode(true);
+            engine.set_initex_mode(true);
+            engine.process(&mut stack, &mut self.events, &mut self.status, "UNUSED.fmt.gz",
+                           &format!("tectonic-format-{}.tex", stem))
+        };
+
+        match result {
+            Ok(TexResult::Spotless) => {},
+            Ok(TexResult::Warnings) => {
+                // tt_warning!(status, "warnings were issued by the TeX engine; use --print and/or --keep-logs for details.");
+            },
+            Ok(TexResult::Errors) => {
+                // tt_error!(status, "errors were issued by the TeX engine; use --print and/or --keep-logs for details.");
+                return Err(ErrorKind::Msg("unhandled TeX engine error".to_owned()).into());
+            },
+            Err(e) => {
+                if let Some(output) = self.io.mem.files.borrow().get(self.io.mem.stdout_key()) {
+                    /*
+                    tt_error!(status, "something bad happened inside TeX; its output follows:\n");
+                    tt_error_styled!(status, "===============================================================================");
+                    status.dump_to_stderr(&output);
+                    tt_error_styled!(status, "===============================================================================");
+                    tt_error_styled!(status, "");
+                    */
+                    eprintln!("{}", ::std::str::from_utf8(output).unwrap());
+                    self.notes.push(::std::str::from_utf8(output).unwrap().to_owned());
+                }
+
+                return Err(e);
+            }
+        }
+
+        // Now we can write the format file to its special location. In
+        // principle we could stream the format file directly to the staging
+        // area as we ran the TeX engine, but we don't bother.
+
+        let bundle = &mut *self.io.bundle.as_mut();
+
+        for (name, contents) in &*self.io.mem.files.borrow() {
+            if name == self.io.mem.stdout_key() {
+                continue;
+            }
+
+            let sname = name.to_string_lossy();
+
+            if !sname.ends_with(".fmt.gz") {
+                continue;
+            }
+
+            // Note that we intentionally pass 'stem', not 'name'.
+            bundle.write_format(stem, contents, &mut self.status).chain_err(|| format!("cannot write format file {}", sname))?;
+        }
+
+        // All done. Clear the memory layer since this was a special preparatory step.
+        self.io.mem.files.borrow_mut().clear();
+
+        Ok(0)
+    }
 
     /// The "default" pass really runs a bunch of sub-passes. It is a "Do What
     /// I Mean" operation.
-    fn default_pass(&mut self, tex_path: &PathBuf, bibtex_first: bool) -> Result<()> {
-        // If `bibtex_first` is true, we start by running bibtex, and run
-        // proceed with the standard rerun logic. Otherwise, we run TeX,
-        // auto-detect whether we need to run bibtex, possibly run it, and
-        // then go ahead.
+    fn default_pass(&mut self, tex_path: &PathBuf) -> Result<()> {
+        self.tex_pass(tex_path, None)?;
+
         let mut aux_path = tex_path.clone();
         aux_path.set_extension("aux");
 
@@ -358,6 +475,7 @@ impl AnalysisDriver {
                         }
                     },
                     None => {
+                        eprintln!("no rerun needed");
                         break;
                 }
             };
@@ -389,15 +507,17 @@ impl AnalysisDriver {
     /// Run one pass of the TeX engine.
 
     fn tex_pass(&mut self, tex_path: &PathBuf, rerun_explanation: Option<&str>) -> Result<()> {
+        eprintln!("TeX_pass({:?})", tex_path);
+        self.notes.push(format!("TeX pass on file: {:?}", tex_path));
         let result = {
-            let mut stack = self.io.as_stack();
+            let mut stack = self.io.as_stack(true);
             let mut engine = TexEngine::new();
             engine.set_halt_on_error_mode(true);
             engine.set_initex_mode(false);
             if let Some(s) = rerun_explanation {
-                // status.note_highlighted("Rerunning ", "TeX", &format!(" because {} ...", s));
+                self.notes.push(format!("Rerunning TeX because {} ...", s));
             } else {
-                // status.note_highlighted("Running ", "TeX", " ...");
+                self.notes.push("Rerunning Tex".to_owned());
             }
 
             engine.process(&mut stack, &mut self.events, &mut self.status,
@@ -412,6 +532,7 @@ impl AnalysisDriver {
                 if let Some(output) = self.io.mem.files.borrow().get(self.io.mem.stdout_key()) {
                     // status.dump_to_stderr(&output);
                     eprintln!("{}", ::std::str::from_utf8(output).unwrap());
+                    self.notes.push(::std::str::from_utf8(output).unwrap().to_owned());
                 }
 
                 return Err(e);

@@ -38,7 +38,6 @@ extern crate tectonic;
 extern crate parking_lot;
 
 use std::sync::Arc;
-use std::io::Write;
 
 mod actions;
 mod analysis;
@@ -56,7 +55,8 @@ pub fn main() {
 
     let vfs = Arc::new(vfs::Vfs::new());
 
-    let (build_queue, analysis_host) = analysis::BuildQueue::connected(vfs.clone());
+    let build_request_chan = analysis::AnalysisDriver::spawn();
+    let build_queue = analysis::BuildQueue::new(vfs.clone(), build_request_chan);
 
     server::run_server(vfs, Arc::new(build_queue));
 }
