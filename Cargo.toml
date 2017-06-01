@@ -27,3 +27,6 @@ url_serde = "0.2.0"
 [dependencies.tectonic]
 path = "./tectonic"
 version = "0.1.6-dev"
+
+[profile.dev]
+opt-level = 3
