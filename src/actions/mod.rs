@@ -8,8 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-mod compiler_message_parsing;
-pub mod lsp_extensions;
+// mod compiler_message_parsing;
+// mod lsp_extensions;
 
 use analysis::{AnalysisDriver};
 use url::Url;
@@ -27,10 +27,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::io::Write;
 
-use self::lsp_extensions::{PublishRustDiagnosticsParams, RustDiagnostic};
-use self::compiler_message_parsing::{FileDiagnostic, ParseError};
+// use self::lsp_extensions::{PublishRustDiagnosticsParams, RustDiagnostic};
+// use self::compiler_message_parsing::{FileDiagnostic, ParseError};
 
-type BuildResults = HashMap<PathBuf, Vec<RustDiagnostic>>;
+type BuildResults = HashMap<PathBuf, Vec<Diagnostic>>;
 
 pub struct ActionHandler {
     vfs: Arc<Vfs>,
@@ -73,39 +73,24 @@ impl ActionHandler {
             }
         }
 
-        fn parse_compiler_messages(messages: &[String], results: &mut BuildResults) {
-            for msg in messages {
-                match compiler_message_parsing::parse(msg) {
-                    Ok(FileDiagnostic { file_path, diagnostic }) => {
-                        results.entry(file_path).or_insert_with(Vec::new).push(diagnostic);
-                    }
-                    Err(ParseError::JsonError(e)) => {
-                        debug!("build error {:?}", e);
-                        debug!("from {}", msg);
-                    }
-                    Err(ParseError::NoSpans) => {}
-                }
-            }
-        }
-
         fn convert_build_results_to_notifications(build_results: &BuildResults)
-            -> Vec<NotificationMessage<PublishRustDiagnosticsParams>>
+            -> Vec<NotificationMessage<PublishDiagnosticsParams>>
         {
             let cwd = ::std::env::current_dir().unwrap();
 
             build_results
-            .iter()
-            .map(|(path, diagnostics)| {
-                let method = "textDocument/publishDiagnostics".to_string();
+                .iter()
+                .map(|(path, diagnostics)| {
+                    let method = "textDocument/publishDiagnostics".to_string();
 
-                let params = PublishRustDiagnosticsParams {
-                    uri: Url::from_file_path(cwd.join(path)).unwrap(),
-                    diagnostics: diagnostics.clone(),
-                };
+                    let params = PublishDiagnosticsParams {
+                        uri: Url::from_file_path(cwd.join(path)).unwrap(),
+                        diagnostics: diagnostics.clone(),
+                    };
 
-                NotificationMessage::new(method, params)
-            })
-            .collect()
+                    NotificationMessage::new(method, params)
+                })
+                .collect()
         }
 
         // We use `texDocument` document here since these notifications are
@@ -124,7 +109,7 @@ impl ActionHandler {
                 let notifications = {
                     let mut results = self.previous_build_results.lock().unwrap();
                     clear_build_results(&mut results);
-                    parse_compiler_messages(&x, &mut results);
+                    // parse_compiler_messages(&x, &mut results);
                     convert_build_results_to_notifications(&results)
                 };
 
@@ -136,7 +121,6 @@ impl ActionHandler {
                 }
 
                 trace!("reload analysis: {:?}", project_path);
-                // let cwd = ::std::env::current_dir().unwrap();
                 out.notify("texDocument/diagnosticsEnd");
             }
             BuildResult::Squashed => {
