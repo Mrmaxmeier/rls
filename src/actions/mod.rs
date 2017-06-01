@@ -9,7 +9,7 @@
 // except according to those terms.
 
 mod compiler_message_parsing;
-mod lsp_extensions;
+pub mod lsp_extensions;
 
 use analysis::{AnalysisDriver};
 use url::Url;
