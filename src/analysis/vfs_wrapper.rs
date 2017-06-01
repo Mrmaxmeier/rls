@@ -1,6 +1,5 @@
-use std::ffi::{OsStr, OsString};
-use std::fs::File;
-use std::io::{self, Cursor, Read, Seek, SeekFrom, Write, BufReader};
+use std::ffi::OsStr;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -47,7 +46,7 @@ impl IoProvider for VfsIoProvider {
                 FileContents::Text(string) => string.into_bytes(),
                 FileContents::Binary(data) => data
             },
-            Err(e) => return OpenResult::NotAvailable
+            Err(_) => return OpenResult::NotAvailable
         };
 
         let file = Cursor::new(contents);

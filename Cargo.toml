@@ -10,7 +10,6 @@ categories = ["development-tools"]
 build = "build.rs"
 
 [dependencies]
-aho-corasick = "0.6.3"
 derive-new = "0.3"
 env_logger = "0.4"
 languageserver-types = "0.10.0"
@@ -22,7 +21,6 @@ serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
 toml = "0.4"
-parking_lot = "0.4.3"
 url = "1.1.0"
 url_serde = "0.2.0"
 

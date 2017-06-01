@@ -4,18 +4,14 @@
 
 // #[macro_use] extern crate tectonic;
 
-use aho_corasick::{Automaton, AcAutomaton};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process;
 use std::sync::Arc;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::thread;
-
-use parking_lot::Mutex;
 
 use tectonic::config::PersistentConfig;
 use tectonic::digest::DigestData;
@@ -241,13 +237,12 @@ const DEFAULT_MAX_TEX_PASSES: usize = 6;
 impl AnalysisDriver {
     pub fn new(vfs: Arc<Vfs>) -> Result<AnalysisDriver> {
 
-        let config = PersistentConfig::open(false)?;
         let mut status = NoopStatusBackend {};
 
         // Set up I/O.
 
-        let config = PersistentConfig::open(false).unwrap();
-        let bundle = config.default_io_provider(&mut status).unwrap();
+        let config = PersistentConfig::open(false)?;
+        let bundle = config.default_io_provider(&mut status)?;
         let io = CliIoSetup::new(bundle, vfs)?;
 
         // Ready to roll.

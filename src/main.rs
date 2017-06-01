@@ -33,9 +33,7 @@ extern crate toml;
 extern crate url;
 extern crate url_serde;
 
-extern crate aho_corasick;
 extern crate tectonic;
-extern crate parking_lot;
 
 use std::sync::Arc;
 
