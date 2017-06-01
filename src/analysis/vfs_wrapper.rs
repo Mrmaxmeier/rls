@@ -32,8 +32,6 @@ impl IoProvider for VfsIoProvider {
         } else {
             Path::new(name).to_path_buf()
         };
-        eprintln!("input_open_name({:?})", path);
-        eprintln!("cached files: {:#?}", self.vfs.get_cached_files().keys().collect::<Vec<_>>());
 
         if self.vfs.file_is_synced(path.as_path()).is_err() {
             // The result of file_is_synced is not important, Error::FileNotCached is.
