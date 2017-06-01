@@ -18,12 +18,12 @@ use tectonic::digest::DigestData;
 use tectonic::engines::IoEventBackend;
 use tectonic::errors::{ErrorKind, Result, ResultExt};
 use tectonic::io::{FilesystemIo, GenuineStdoutIo, InputOrigin, IoProvider, IoStack, MemoryIo, OpenResult};
-use tectonic::status::NoopStatusBackend;
 use tectonic::{TexEngine, TexResult};
 use vfs::Vfs;
 
 use analysis::build_queue::{BuildContext, BuildResult};
 use analysis::vfs_wrapper::VfsIoProvider;
+use analysis::status_backend::LanguageServerStatusBackend;
 
 /// The CliIoSetup struct encapsulates, well, the input/output setup used by
 /// the Tectonic engines in this CLI session.
@@ -228,7 +228,7 @@ pub struct AnalysisDriver {
     events: CliIoEvents,
     format_path: String,
     notes: Vec<String>, // current compilation notes
-    status: NoopStatusBackend
+    status: LanguageServerStatusBackend,
 }
 
 
@@ -237,7 +237,7 @@ const DEFAULT_MAX_TEX_PASSES: usize = 6;
 impl AnalysisDriver {
     pub fn new(vfs: Arc<Vfs>) -> Result<AnalysisDriver> {
 
-        let mut status = NoopStatusBackend {};
+        let mut status = LanguageServerStatusBackend::default();
 
         // Set up I/O.
 
@@ -355,6 +355,11 @@ impl AnalysisDriver {
             }
 
             if sname.ends_with(".log") || sname.ends_with(".blg") || sname.ends_with(".aux") {
+                continue;
+            }
+
+            if sname.ends_with(".xdv") {
+                eprintln!("XXX skipping .xdv output file");
                 continue;
             }
 

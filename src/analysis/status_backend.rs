@@ -16,7 +16,7 @@ pub struct StatusMessage {
 
 impl StatusMessage {
     fn range(&self) -> Option<Range> {
-        self.location.map(|loc|
+        self.location.as_ref().map(|loc|
             Range {
                 start: Position { line: loc.lines.0, character: loc.chars.0 },
                 end: Position { line: loc.lines.1, character: loc.chars.1 },
@@ -57,7 +57,10 @@ impl LanguageServerStatusBackend {
         data.iter()
             .map(|msg| {
                 let default_file = "main.tex".to_owned();
-                let file = msg.location.map(|l| l.file.clone()).unwrap_or(default_file);
+                let file = msg.location
+                    .as_ref()
+                    .map(|l| l.file.clone())
+                    .unwrap_or(default_file);
                 (file, msg.as_diagnostic())
             })
             .collect()
@@ -65,7 +68,9 @@ impl LanguageServerStatusBackend {
 }
 
 impl StatusBackend for LanguageServerStatusBackend {
-    fn report(&mut self, kind: MessageKind, args: Arguments, err: Option<&Error>) {
+    fn report(&mut self, kind: MessageKind, args: Arguments, _err: Option<&Error>) {
+        eprintln!("{:?} {}", kind, args);
+        debug_assert!(_err.is_none());
         self.data.push(StatusMessage {
             location: None,
             kind: kind,
@@ -74,6 +79,7 @@ impl StatusBackend for LanguageServerStatusBackend {
     }
 
     fn report_at(&mut self, location: MessageLocation, kind: MessageKind, args: Arguments) {
+        eprintln!("{:?} [{}] {}", kind, location, args);
         self.data.push(StatusMessage {
             location: Some(location),
             kind: kind,
