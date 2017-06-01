@@ -1,3 +1,4 @@
 [submodule "tectonic"]
 	path = tectonic
-	url = https://github.com/tectonic-typesetting/tectonic
+	url = https://github.com/Mrmaxmeier/tectonic
+	branch = texls
