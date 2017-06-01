@@ -1,0 +1,3 @@
+[submodule "tectonic"]
+	path = tectonic
+	url = https://github.com/tectonic-typesetting/tectonic
