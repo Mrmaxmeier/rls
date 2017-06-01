@@ -96,58 +96,6 @@ pub mod ls_util {
     }
 }
 
-pub fn source_kind_from_def_kind(k: raw::DefKind) -> SymbolKind {
-    match k {
-        raw::DefKind::Enum => SymbolKind::Enum,
-        raw::DefKind::Tuple => SymbolKind::Array,
-        raw::DefKind::Struct => SymbolKind::Class,
-        raw::DefKind::Union => SymbolKind::Class,
-        raw::DefKind::Trait => SymbolKind::Interface,
-        raw::DefKind::Function |
-        raw::DefKind::Method |
-        raw::DefKind::Macro => SymbolKind::Function,
-        raw::DefKind::Mod => SymbolKind::Module,
-        raw::DefKind::Type => SymbolKind::Interface,
-        raw::DefKind::Local |
-        raw::DefKind::Static |
-        raw::DefKind::Const |
-        raw::DefKind::Field => SymbolKind::Variable,
-    }
-}
-
-pub fn completion_kind_from_match_type(m : racer::MatchType) -> CompletionItemKind {
-    match m {
-        racer::MatchType::Crate |
-        racer::MatchType::Module => CompletionItemKind::Module,
-        racer::MatchType::Struct => CompletionItemKind::Class,
-        racer::MatchType::Enum => CompletionItemKind::Enum,
-        racer::MatchType::StructField |
-        racer::MatchType::EnumVariant => CompletionItemKind::Field,
-        racer::MatchType::Macro |
-        racer::MatchType::Function |
-        racer::MatchType::FnArg |
-        racer::MatchType::Impl => CompletionItemKind::Function,
-        racer::MatchType::Type |
-        racer::MatchType::Trait |
-        racer::MatchType::TraitImpl => CompletionItemKind::Interface,
-        racer::MatchType::Let |
-        racer::MatchType::IfLet |
-        racer::MatchType::WhileLet |
-        racer::MatchType::For |
-        racer::MatchType::MatchArm |
-        racer::MatchType::Const |
-        racer::MatchType::Static => CompletionItemKind::Variable,
-        racer::MatchType::Builtin => CompletionItemKind::Keyword,
-    }
-}
-
-pub fn completion_item_from_racer_match(m : racer::Match) -> CompletionItem {
-    let mut item = CompletionItem::new_simple(m.matchstr.clone(), m.contextstr.clone());
-    item.kind = Some(completion_kind_from_match_type(m.mtype));
-
-    item
-}
-
 /* -----------------  JSON-RPC protocol types ----------------- */
 
 /// An event-like (no response needed) notification message.
