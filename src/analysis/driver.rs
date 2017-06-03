@@ -271,11 +271,16 @@ impl AnalysisDriver {
         for request in &request_chan {
             eprintln!("new build request: {:?}", request);
             self.io.vfs.set_base(request.directory.as_path());
-            let result = match self.run(&request.file) {
-                Ok(_) => BuildResult::Success(self.notes.clone(), None), // TODO
+            // TODO: panic::catch_unwind => BuildResult::Err
+            let result = self.run(&request.file);
+            let log = self.status.debug_log();
+            let diagnostics = self.status.diagnostics();
+            self.status.clear();
+            let result = match result {
+                Ok(_) => BuildResult::Success((log, diagnostics), None), // TODO
                 Err(err) => {
-                    eprintln!("Build error: {:?}", err);
-                    BuildResult::Err
+                    eprintln!("Build error: {}", err);
+                    BuildResult::Failure((log, diagnostics), None) // TODO
                 },
             };
             eprintln!("reporting result: {:?}", result);
@@ -518,7 +523,7 @@ impl AnalysisDriver {
         let result = {
             let mut stack = self.io.as_stack(true);
             let mut engine = TexEngine::new();
-            engine.set_halt_on_error_mode(true);
+            engine.set_halt_on_error_mode(false);
             engine.set_initex_mode(false);
             if let Some(s) = rerun_explanation {
                 self.notes.push(format!("Rerunning TeX because {} ...", s));

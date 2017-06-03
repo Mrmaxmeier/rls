@@ -11,9 +11,10 @@
 // mod compiler_message_parsing;
 // mod lsp_extensions;
 
-use analysis::{AnalysisDriver};
+// use analysis::{AnalysisDriver};
 use url::Url;
-use vfs::{Vfs, Change, FileContents};
+// use vfs::{Vfs, Change, FileContents};
+use vfs::{Vfs, Change};
 use serde_json;
 use Span;
 
@@ -25,12 +26,12 @@ use server::Output;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::io::Write;
+// use std::io::Write;
 
 // use self::lsp_extensions::{PublishRustDiagnosticsParams, RustDiagnostic};
 // use self::compiler_message_parsing::{FileDiagnostic, ParseError};
 
-type BuildResults = HashMap<PathBuf, Vec<Diagnostic>>;
+pub type BuildResults = HashMap<PathBuf, Vec<Diagnostic>>;
 
 pub struct ActionHandler {
     vfs: Arc<Vfs>,
@@ -100,18 +101,21 @@ impl ActionHandler {
         debug!("build {:?}", project_path);
         let result = self.build_queue.request_build(project_path, current_file, priority);
         match result {
-            BuildResult::Success(x, analysis) | BuildResult::Failure(x, analysis) => {
+            BuildResult::Success(report, _analysis) | BuildResult::Failure(report, _analysis) => {
                 debug!("build - Success");
 
                 // These notifications will include empty sets of errors for files
                 // which had errors, but now don't. This instructs the IDE to clear
                 // errors for those files.
+                /*
                 let notifications = {
                     let mut results = self.previous_build_results.lock().unwrap();
                     clear_build_results(&mut results);
                     // parse_compiler_messages(&x, &mut results);
                     convert_build_results_to_notifications(&results)
                 };
+                */
+                let notifications = convert_build_results_to_notifications(&report.1);
 
                 // TODO we don't send an OK notification if there were no errors
                 for notification in notifications {

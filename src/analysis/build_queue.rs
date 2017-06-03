@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use data::Analysis;
+// use data::Analysis;
 use vfs::Vfs;
 
 // use std::fs::{read_dir, remove_file};
@@ -23,12 +23,16 @@ use std::thread;
 use std::time::Duration;
 
 
+use actions::BuildResults;
+
+pub type Analysis = ();
+
 #[derive(Debug)]
 pub enum BuildResult {
     // Build was succesful, argument is warnings.
-    Success(Vec<String>, Option<Analysis>),
+    Success((Vec<String>, BuildResults), Option<Analysis>),
     // Build finished with errors, argument is errors and warnings.
-    Failure(Vec<String>, Option<Analysis>),
+    Failure((Vec<String>, BuildResults), Option<Analysis>),
     // Build was coelesced with another build.
     Squashed,
     // There was an error attempting to build.
